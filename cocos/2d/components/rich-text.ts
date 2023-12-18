@@ -1,19 +1,16 @@
 /*
  Copyright (c) 2013-2016 Chukong Technologies Inc.
- Copyright (c) 2017-2023 Xiamen Yaji Software Co., Ltd.
-
+ Copyright (c) 2017-2020 Xiamen Yaji Software Co., Ltd.
  http://www.cocos.com
-
  Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights to
- use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
- of the Software, and to permit persons to whom the Software is furnished to do so,
- subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
+ of this software and associated engine source code (the "Software"), a limited,
+  worldwide, royalty-free, non-assignable, revocable and non-exclusive license
+ to use Cocos Creator solely to develop games on your target platforms. You shall
+  not use Cocos Creator software for developing other software or tools that's
+  used for developing games. You are not granted to publish, distribute,
+  sublicense, and/or sell copies of Cocos Creator.
+ The software or tools in this License Agreement are licensed, not sold.
+ Xiamen Yaji Software Co., Ltd. reserves all rights not expressly granted to you.
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,31 +21,31 @@
 */
 
 import { ccclass, executeInEditMode, executionOrder, help, menu, tooltip, multiline, type, displayOrder, serializable } from 'cc.decorator';
-import { DEBUG, DEV, EDITOR } from 'internal:constants';
+import { DEV, EDITOR } from 'internal:constants';
 import { Font, SpriteAtlas, TTFFont, SpriteFrame } from '../assets';
 import { EventTouch } from '../../input/types';
-import { assert, warnID, Color, Vec2, CCObject, cclegacy, js, Size } from '../../core';
+import { assert, warnID } from '../../core/platform';
 import { BASELINE_RATIO, fragmentText, isUnicodeCJK, isUnicodeSpace, getEnglishWordPartAtFirst, getEnglishWordPartAtLast } from '../utils/text-utils';
 import { HtmlTextParser, IHtmlTextParserResultObj, IHtmlTextParserStack } from '../utils/html-text-parser';
+import { Pool } from '../../core/utils/pool';
+import { Color, Vec2 } from '../../core/math';
 import { Node } from '../../scene-graph';
 import { CacheMode, HorizontalTextAlignment, Label, VerticalTextAlignment } from './label';
 import { LabelOutline } from './label-outline';
 import { Sprite } from './sprite';
 import { UITransform } from '../framework';
 import { Component } from '../../scene-graph/component';
+import { CCObject, cclegacy } from '../../core';
 import { NodeEventType } from '../../scene-graph/node-event';
 
 const _htmlTextParser = new HtmlTextParser();
 const RichTextChildName = 'RICHTEXT_CHILD';
 const RichTextChildImageName = 'RICHTEXT_Image_CHILD';
 
-const _tempSize = new Vec2();
-const _tempSizeLeft = new Vec2();
-
 /**
  * 富文本池。<br/>
  */
-const labelPool = new js.Pool((seg: ISegment) => {
+const labelPool = new Pool((seg: ISegment) => {
     if (DEV) {
         assert(!seg.node.parent, 'Recycling node\'s parent should be null!');
     }
@@ -63,7 +60,7 @@ const labelPool = new js.Pool((seg: ISegment) => {
     return true;
 }, 20);
 
-const imagePool = new js.Pool((seg: ISegment) => {
+const imagePool = new Pool((seg: ISegment) => {
     if (DEV) {
         assert(!seg.node.parent, 'Recycling node\'s parent should be null!');
     }
@@ -237,10 +234,10 @@ export class RichText extends Component {
 
     /**
      * @en
-     * Custom System font of RichText.
+     * Custom System font of RichText
      *
      * @zh
-     * 富文本定制系统字体。
+     * 富文本定制系统字体
      */
     @tooltip('i18n:richtext.font_family')
     get fontFamily () {
@@ -428,17 +425,7 @@ export class RichText extends Component {
             }
         }
     }
-    /**
-     * @en Enum for horizontal text alignment.
-     *
-     * @zh 文本横向对齐类型。
-     */
     public static HorizontalAlign = HorizontalTextAlignment;
-    /**
-     * @en Enum for vertical text alignment.
-     *
-     * @zh 文本垂直对齐类型。
-     */
     public static VerticalAlign = VerticalTextAlignment;
 
     @serializable
@@ -491,7 +478,6 @@ export class RichText extends Component {
 
     public onLoad () {
         this.node.on(NodeEventType.LAYER_CHANGED, this._applyLayer, this);
-        this.node.on(NodeEventType.ANCHOR_CHANGED, this._updateRichTextPosition, this);
     }
 
     public onEnable () {
@@ -509,6 +495,11 @@ export class RichText extends Component {
         }
 
         this._activateChildren(false);
+    }
+
+    public start () {
+        this._onTTFLoaded();
+        this.node.on(NodeEventType.ANCHOR_CHANGED, this._updateRichTextPosition, this);
     }
 
     public onRestore () {
@@ -575,27 +566,24 @@ export class RichText extends Component {
     /**
     * @engineInternal
     */
-    protected splitLongStringApproximatelyIn2048 (text: string, styleIndex: number) {
-        const approxSize = text.length * this.fontSize;
+    protected SplitLongStringApproximatelyIn2048 (text: string, styleIndex: number) {
+        const labelSize = this._calculateSize(styleIndex, text);
         const partStringArr: string[] = [];
-        // avoid that many short richtext still execute _calculateSize so that performance is low
-        // we set a threshold as 2048 * 0.8, if the estimated size is less than it, we can skip _calculateSize precisely
-        if (approxSize <= 2048 * 0.8) {
-            partStringArr.push(text);
-            return partStringArr;
-        }
-
-        this._calculateSize(_tempSize, styleIndex, text);
-        if (_tempSize.x < 2048) {
+        if (labelSize.x < 2048) {
             partStringArr.push(text);
         } else {
             const multilineTexts = text.split('\n');
             for (let i = 0; i < multilineTexts.length; i++) {
-                this._calculateSize(_tempSize, styleIndex, multilineTexts[i]);
-                if (_tempSize.x < 2048) {
+                const thisPartSize = this._calculateSize(styleIndex, multilineTexts[i]);
+                if (thisPartSize.x < 2048) {
                     partStringArr.push(multilineTexts[i]);
                 } else {
-                    const thisPartSplitResultArr =  this.splitLongStringOver2048(multilineTexts[i], styleIndex);
+                    // if it is not the first element, it is right behind a "\n", so we should reset the lineOffsetX as 0.
+                    let currOffsetX = i === 0 ? this._lineOffsetX : 0;
+                    if (this._lineOffsetX >= this.maxWidth - this.fontSize) {
+                        currOffsetX = 0;
+                    }
+                    const thisPartSplitResultArr = this.splitLongStringOver2048(multilineTexts[i], styleIndex, currOffsetX);
                     partStringArr.push(...thisPartSplitResultArr);
                 }
             }
@@ -606,7 +594,7 @@ export class RichText extends Component {
     /**
     * @engineInternal
     */
-    protected splitLongStringOver2048 (text: string, styleIndex: number) {
+    protected splitLongStringOver2048 (text: string, styleIndex: number, lineOffsetX) {
         const partStringArr: string[] = [];
         const longStr = text;
 
@@ -614,19 +602,19 @@ export class RichText extends Component {
         let curEnd = longStr.length / 2;
         let curString = longStr.substring(curStart, curEnd);
         let leftString = longStr.substring(curEnd);
-        const curStringSize = this._calculateSize(_tempSize, styleIndex, curString);
-        const leftStringSize = this._calculateSize(_tempSizeLeft, styleIndex, leftString);
-        let maxWidth = this._maxWidth;
-        if (this._maxWidth === 0) {
-            maxWidth = 2047.9; // Callback when maxWidth is 0
-        }
-
+        let curStringSizeX = this._calculateSize(styleIndex, curString).x;
+        let leftStringSizeX = this._calculateSize(styleIndex, leftString).x;
         // a line should be an unit to split long string
         const lineCountForOnePart = 1;
-        const sizeForOnePart = lineCountForOnePart * maxWidth;
+
+        let sizeForThisPart = lineCountForOnePart * this.maxWidth;
+
+        // it does influence the first element of splitted array,
+        // the element should put into the left space in current line
+        sizeForThisPart -= lineOffsetX;
 
         // divide text into some pieces of which the size is less than sizeForOnePart
-        while (curStringSize.x > sizeForOnePart) {
+        while (curStringSizeX > sizeForThisPart) {
             curEnd /= 2;
             // at least one char can be an entity, step back.
             if (curEnd < 1) {
@@ -636,7 +624,7 @@ export class RichText extends Component {
 
             curString = curString.substring(curStart, curEnd);
             leftString = longStr.substring(curEnd);
-            this._calculateSize(curStringSize, styleIndex, curString);
+            curStringSizeX = this._calculateSize(styleIndex, curString).x;
         }
 
         // avoid too many loops
@@ -644,7 +632,7 @@ export class RichText extends Component {
         // the minimum step of expansion or reduction
         let curWordStep = 1;
         while (leftTryTimes && curStart < text.length) {
-            while (leftTryTimes && curStringSize.x < sizeForOnePart) {
+            while (leftTryTimes && curStringSizeX + this.fontSize < sizeForThisPart) {
                 const nextPartExec = getEnglishWordPartAtFirst(leftString);
                 // add a character, unless there is a complete word at the beginning of the next line
                 if (nextPartExec && nextPartExec.length > 0) {
@@ -654,16 +642,16 @@ export class RichText extends Component {
 
                 curString = longStr.substring(curStart, curEnd);
                 leftString = longStr.substring(curEnd);
-                this._calculateSize(curStringSize, styleIndex, curString);
+                curStringSizeX = this._calculateSize(styleIndex, curString).x;
 
                 leftTryTimes--;
             }
 
             // reduce condition：size > maxwidth && curString.length >= 2
-            while (leftTryTimes && curString.length >= 2 && curStringSize.x > sizeForOnePart) {
+            while (leftTryTimes && curString.length >= 2 && curStringSizeX > sizeForThisPart) {
                 curEnd -= curWordStep;
                 curString = longStr.substring(curStart, curEnd);
-                this._calculateSize(curStringSize, styleIndex, curString);
+                curStringSizeX = this._calculateSize(styleIndex, curString).x;
                 // after the first reduction, the step should be 1.
                 curWordStep = 1;
 
@@ -685,26 +673,40 @@ export class RichText extends Component {
             // but step must be integer because we split the complete characters of which the unit is integer.
             // it is reasonable that using the length of this result to estimate the next result.
             partStringArr.push(curString);
-            const partStep = curString.length;
+            // after putting the first element in array, we should reset sizeForThisPart
+            sizeForThisPart = lineCountForOnePart * this.maxWidth;
+
+            // generate the next element
+            const nextStep = sizeForThisPart / this.fontSize;
             curStart = curEnd;
-            curEnd += partStep;
+            curEnd += nextStep;
 
             curString = longStr.substring(curStart, curEnd);
+            curStringSizeX = this._calculateSize(styleIndex, curString).x;
             leftString = longStr.substring(curEnd);
-            this._calculateSize(leftStringSize, styleIndex, leftString);
-            this._calculateSize(curStringSize, styleIndex, curString);
+            leftStringSizeX = this._calculateSize(styleIndex, leftString).x;
 
             leftTryTimes--;
 
-            // Exit: If the left part string size is less than 2048, the method will finish.
-            if (leftStringSize.x < 2048 && curStringSize.x < sizeForOnePart) {
-                partStringArr.push(curString);
+            // Exit1: If the current string is the last part of text,
+            // the leftString will be empty string, then we should exit
+            if (!leftString) {
                 curStart = text.length;
                 curEnd = text.length;
+                partStringArr.push(curString);
+                break;
+            }
+
+            // Exit2: If the current string size is approaching to max width in one line and
+            // the left part string size is less than 2048, the method will finish.
+            if (curStringSizeX <= sizeForThisPart
+                && curStringSizeX + this.fontSize > sizeForThisPart
+                && leftStringSizeX < 2048) {
+                curStart = text.length;
+                curEnd = text.length;
+                partStringArr.push(curString);
+                partStringArr.push(leftString);
                 curString = leftString;
-                if (leftString !== '') {
-                    partStringArr.push(curString);
-                }
                 break;
             }
         }
@@ -714,8 +716,8 @@ export class RichText extends Component {
 
     protected _measureText (styleIndex: number, string?: string) {
         const func = (s: string) => {
-            const width = this._calculateSize(_tempSize, styleIndex, s).x;
-            return width;
+            const labelSize = this._calculateSize(styleIndex, s);
+            return labelSize.width;
         };
         if (string) {
             return func(string);
@@ -727,7 +729,7 @@ export class RichText extends Component {
     /**
     * @engineInternal
     */
-    protected _calculateSize (out: Vec2, styleIndex: number, s: string) {
+    protected _calculateSize (styleIndex: number, s: string) {
         let label: ISegment;
         if (this._labelSegmentsCache.length === 0) {
             label = this._createFontLabel(s);
@@ -738,9 +740,8 @@ export class RichText extends Component {
         }
         label.styleIndex = styleIndex;
         this._applyTextAttribute(label);
-        const size = label.node._uiProps.uiTransformComp!.contentSize;
-        Vec2.set(out, size.x, size.y);
-        return out;
+        const labelSize = label.node._uiProps.uiTransformComp!.contentSize;
+        return labelSize;
     }
 
     protected _onTouchEnded (event: EventTouch) {
@@ -777,10 +778,13 @@ export class RichText extends Component {
         for (let i = children.length - 1; i >= 0; i--) {
             const child = children[i];
             if (child.name === RichTextChildName || child.name === RichTextChildImageName) {
-                if (DEBUG) {
-                    assert(child.parent === this.node);
+                if (child.parent === this.node) {
+                    child.parent = null;
+                } else {
+                    // In case child.parent !== this.node, child cannot be removed from children
+
+                    children.splice(i, 1);
                 }
-                child.parent = null;
 
                 const segment = createSegment(child.name);
                 segment.node = child;
@@ -837,6 +841,7 @@ export class RichText extends Component {
         labelSegment.lineCount = this._lineCount;
         labelSegment.node._uiProps.uiTransformComp!.setAnchorPoint(0, 0);
         labelSegment.node.layer = this.node.layer;
+        labelSegment.node.active = true;
         this.node.insertChild(labelSegment.node, this._labelChildrenNum++);
         this._applyTextAttribute(labelSegment);
         this._segments.push(labelSegment);
@@ -1059,7 +1064,7 @@ export class RichText extends Component {
                 }
             }
 
-            const splitArr: string[] = this.splitLongStringApproximatelyIn2048(text, i);
+            const splitArr: string[] = this.SplitLongStringApproximatelyIn2048(text, i);
             text = splitArr.join('\n');
 
             const multilineTexts = text.split('\n');
@@ -1081,7 +1086,8 @@ export class RichText extends Component {
                     const labelWidth = this._measureText(i, labelString) as number;
                     this._updateRichTextWithMaxWidth(labelString, labelWidth, i);
 
-                    if (multilineTexts.length > 1 && j < multilineTexts.length - 1) {
+                    if ((multilineTexts.length > 1 && j < multilineTexts.length - 1)
+                    || (j === multilineTexts.length - 1 && this._lineOffsetX >= this.maxWidth - this.fontSize)) {
                         this._updateLineInfo();
                     }
                 } else {
@@ -1282,6 +1288,12 @@ export class RichText extends Component {
         label.lineHeight = this._lineHeight;
 
         label.updateRenderData(true);
+        // Todo: need update context size after this function call
+        // @ts-expect-error update assembler renderData for richText
+        const assembler = label._assembler;
+        if (assembler) {
+            assembler.updateRenderData(label);
+        }
     }
 
     protected _applyLayer () {
