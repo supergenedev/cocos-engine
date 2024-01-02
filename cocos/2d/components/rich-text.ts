@@ -28,7 +28,7 @@ import { assert, warnID } from '../../core/platform';
 import { BASELINE_RATIO, fragmentText, isUnicodeCJK, isUnicodeSpace, getEnglishWordPartAtFirst, getEnglishWordPartAtLast } from '../utils/text-utils';
 import { HtmlTextParser, IHtmlTextParserResultObj, IHtmlTextParserStack } from '../utils/html-text-parser';
 import { Pool } from '../../core/utils/pool';
-import { Color, Vec2 } from '../../core/math';
+import { Color, Vec2, color } from '../../core/math';
 import { Node } from '../../scene-graph';
 import { CacheMode, HorizontalTextAlignment, Label, VerticalTextAlignment } from './label';
 import { LabelOutline } from './label-outline';
@@ -37,10 +37,18 @@ import { UITransform } from '../framework';
 import { Component } from '../../scene-graph/component';
 import { CCObject, cclegacy } from '../../core';
 import { NodeEventType } from '../../scene-graph/node-event';
+import { LabelShadow } from './label-shadow';
+import { property } from '../../core/data/class-decorator';
 
 const _htmlTextParser = new HtmlTextParser();
 const RichTextChildName = 'RICHTEXT_CHILD';
 const RichTextChildImageName = 'RICHTEXT_Image_CHILD';
+
+interface RichTextShadowInfo {
+    color: Color;
+    offset: Vec2;
+    blur: number;
+}
 
 /**
  * 富文本池。<br/>
@@ -72,6 +80,7 @@ function createSegment (type: string): ISegment {
     return {
         node: new Node(type),
         comp: null,
+        shadow: null,
         lineCount: 0,
         styleIndex: 0,
         imageOffset: '',
@@ -81,7 +90,7 @@ function createSegment (type: string): ISegment {
     };
 }
 
-function getSegmentByPool (type: string, content: string | SpriteFrame) {
+function getSegmentByPool (type: string, content: string | SpriteFrame, shadowInfo?: RichTextShadowInfo) {
     let seg;
     if (type === RichTextChildName) {
         seg = labelPool._get();
@@ -105,6 +114,14 @@ function getSegmentByPool (type: string, content: string | SpriteFrame) {
         seg.comp.horizontalAlign = HorizontalTextAlignment.LEFT;
         seg.comp.verticalAlign = VerticalTextAlignment.TOP;
         seg.comp.underlineHeight = 2;
+
+        const shadow = node.getComponent(LabelShadow) || node.addComponent(LabelShadow);
+        shadow.enabled = !!shadowInfo;
+        if (shadowInfo) {
+            shadow.color = shadowInfo.color;
+            shadow.offset = shadowInfo.offset;
+            shadow.blur = shadowInfo.blur;
+        }
     }
     node.setPosition(0, 0, 0);
     const trans = node._uiProps.uiTransformComp!;
@@ -122,6 +139,7 @@ function getSegmentByPool (type: string, content: string | SpriteFrame) {
 interface ISegment {
     node: Node;
     comp: Label | Sprite | null;
+    shadow: LabelShadow | null;
     lineCount: number;
     styleIndex: number;
     imageOffset: string;
@@ -425,6 +443,54 @@ export class RichText extends Component {
             }
         }
     }
+
+    @property()
+    get useShadow () {
+        return this._isUsingShadow;
+    }
+    set useShadow (value) {
+        if (this._isUsingShadow === value) {
+            return;
+        }
+
+        this._isUsingShadow = value;
+        this._updateRichTextShadow();
+    }
+
+    @property(Color)
+    get shadowColor (): Readonly<Color> {
+        return this._shadowColor;
+    }
+    set shadowColor (value) {
+        if (this._shadowColor === value) {
+            return;
+        }
+
+        this._shadowColor.set(value);
+        this._richTextShadowInfo.color.set(value);
+        this._updateRichTextShadow();
+    }
+
+    @property(Vec2)
+    get shadowOffset () {
+        return this._shadowOffset;
+    }
+    set shadowOffset (value) {
+        this._shadowOffset = value;
+        this._richTextShadowInfo.offset = value;
+        this._updateRichTextShadow();
+    }
+
+    @property()
+    get shadowBlur () {
+        return this._shadowBlur;
+    }
+    set shadowBlur (value) {
+        this._shadowBlur = value;
+        this._richTextShadowInfo.blur = value;
+        this._updateRichTextShadow();
+    }
+
     public static HorizontalAlign = HorizontalTextAlignment;
     public static VerticalAlign = VerticalTextAlignment;
 
@@ -456,6 +522,15 @@ export class RichText extends Component {
     @serializable
     protected _handleTouchEvent = true;
 
+    @serializable
+    protected _isUsingShadow = false;
+    @serializable
+    protected _shadowColor: Color = new Color(0, 0, 0, 255);
+    @serializable
+    protected _shadowOffset: Vec2 = new Vec2(0, 0);
+    @serializable
+    protected _shadowBlur = 0;
+
     protected _textArray: IHtmlTextParserResultObj[] = [];
     protected _segments: ISegment[] = [];
     protected _labelSegmentsCache: ISegment[] = [];
@@ -467,6 +542,11 @@ export class RichText extends Component {
     protected _lineOffsetX = 0;
     protected _updateRichTextStatus: () => void;
     protected _labelChildrenNum = 0; // only ISegment
+    protected _richTextShadowInfo: RichTextShadowInfo = {
+        color: new Color(0, 0, 0, 255),
+        offset: new Vec2(0, 0),
+        blur: 0,
+    };
 
     constructor () {
         super();
@@ -478,6 +558,10 @@ export class RichText extends Component {
 
     public onLoad () {
         this.node.on(NodeEventType.LAYER_CHANGED, this._applyLayer, this);
+
+        this._richTextShadowInfo.color.set(this.shadowColor);
+        this._richTextShadowInfo.offset = this.shadowOffset;
+        this._richTextShadowInfo.blur = this.shadowBlur;
     }
 
     public onEnable () {
@@ -546,7 +630,7 @@ export class RichText extends Component {
     }
 
     protected _createFontLabel (str: string): ISegment {
-        return getSegmentByPool(RichTextChildName, str)!;
+        return getSegmentByPool(RichTextChildName, str, this.useShadow ? this._richTextShadowInfo : undefined)!;
     }
 
     protected _createImage (spriteFrame: SpriteFrame): ISegment {
@@ -790,11 +874,13 @@ export class RichText extends Component {
                 segment.node = child;
                 if (child.name === RichTextChildName) {
                     segment.comp = child.getComponent(Label);
+                    segment.shadow = child.getComponent(LabelShadow);
                     labelPool.put(segment);
                 } else {
                     segment.comp = child.getComponent(Sprite);
                     imagePool.put(segment);
                 }
+
                 this._labelChildrenNum--;
             }
         }
@@ -1087,7 +1173,7 @@ export class RichText extends Component {
                     this._updateRichTextWithMaxWidth(labelString, labelWidth, i);
 
                     if ((multilineTexts.length > 1 && j < multilineTexts.length - 1)
-                    || (j === multilineTexts.length - 1 && this._lineOffsetX >= this.maxWidth - this.fontSize)) {
+                        || (j === multilineTexts.length - 1 && this._lineOffsetX >= this.maxWidth - this.fontSize)) {
                         this._updateLineInfo();
                     }
                 } else {
@@ -1308,6 +1394,16 @@ export class RichText extends Component {
         label.isBold = false;
         label.isItalic = false;
         label.isUnderline = false;
+    }
+
+    protected _updateRichTextShadow () {
+        this._segments.forEach((seg) => {
+            if (!seg.shadow) return;
+            seg.shadow.enabled = this.useShadow;
+            seg.shadow.color = this.shadowColor;
+            seg.shadow.blur = this.shadowBlur;
+            seg.shadow.offset = this.shadowOffset;
+        });
     }
 }
 
