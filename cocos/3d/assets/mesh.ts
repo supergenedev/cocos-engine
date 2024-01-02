@@ -556,13 +556,13 @@ export class Mesh extends Asset {
             const stride = bundle.view.stride;
             const vertexCount = vertices.byteLength / stride;
             const updateSize  = vertices.byteLength;
-            const dstBuffer   = new Uint8Array(this._data.buffer, bundle.view.offset, updateSize);
+            // const dstBuffer   = new Uint8Array(this._data.buffer, bundle.view.offset, updateSize);
             const srcBuffer    = new Uint8Array(vertices.buffer, vertices.byteOffset, updateSize);
             const vertexBuffer = subMesh.vertexBuffers[index];
             assertIsTrue(vertexCount <= info.maxSubMeshVertices, 'Too many vertices.');
 
             if (updateSize > 0) {
-                dstBuffer.set(srcBuffer);
+                // dstBuffer.set(srcBuffer);
                 vertexBuffer.update(srcBuffer, updateSize);
             }
 
@@ -575,14 +575,14 @@ export class Mesh extends Asset {
             const stride       = indexView.stride;
             const indexCount   = (stride === 2) ? dynamicGeometry.indices16!.length : dynamicGeometry.indices32!.length;
             const updateSize   = indexCount * stride;
-            const dstBuffer   = new Uint8Array(this._data.buffer, indexView.offset, updateSize);
+            // const dstBuffer   = new Uint8Array(this._data.buffer, indexView.offset, updateSize);
             const srcBuffer    = (stride === 2) ? new Uint8Array(dynamicGeometry.indices16!.buffer, dynamicGeometry.indices16!.byteOffset, updateSize)
                 : new Uint8Array(dynamicGeometry.indices32!.buffer, dynamicGeometry.indices32!.byteOffset, updateSize);
             const indexBuffer  = subMesh.indexBuffer!;
             assertIsTrue(indexCount <= info.maxSubMeshIndices, 'Too many indices.');
 
             if (updateSize > 0) {
-                dstBuffer.set(srcBuffer);
+                // dstBuffer.set(srcBuffer);
                 indexBuffer.update(srcBuffer, updateSize);
             }
 
