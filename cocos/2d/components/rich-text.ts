@@ -491,6 +491,21 @@ export class RichText extends Component {
         this._updateRichTextShadow();
     }
 
+    @property()
+    get fixBold () {
+        return this._fixBold;
+    }
+    set fixBold (value) {
+        this._fixBold = value;
+    }
+
+    get fixLineHeight () {
+        return this._fixLineHeight;
+    }
+    set fixLineHeight (value) {
+        this._fixLineHeight = value;
+    }
+
     public static HorizontalAlign = HorizontalTextAlignment;
     public static VerticalAlign = VerticalTextAlignment;
 
@@ -530,6 +545,11 @@ export class RichText extends Component {
     protected _shadowOffset: Vec2 = new Vec2(0, 0);
     @serializable
     protected _shadowBlur = 0;
+
+    @serializable
+    protected _fixBold = false;
+    @serializable
+    protected _fixLineHeight = false;
 
     protected _textArray: IHtmlTextParserResultObj[] = [];
     protected _segments: ISegment[] = [];
@@ -1100,7 +1120,9 @@ export class RichText extends Component {
                     this._labelWidth = this._lineOffsetX;
                 }
             }
-            segment.node._uiProps.uiTransformComp!.setContentSize(spriteWidth, spriteHeight);
+            if (!this._fixLineHeight) {
+                segment.node._uiProps.uiTransformComp!.setContentSize(spriteWidth, spriteHeight);
+            }
             segment.lineCount = this._lineCount;
 
             segment.clickHandler = '';
@@ -1124,7 +1146,6 @@ export class RichText extends Component {
             this._updateLabelSegmentTextAttributes();
             return;
         }
-
         this._textArray = newTextArray.slice();
         this._resetState();
 
@@ -1149,12 +1170,11 @@ export class RichText extends Component {
                     continue;
                 }
             }
-
+            //SplitLongStringApproximatelyIn2048을 수정해야한다. setString(현재, 기준) 이렇게 보내서 처리 할 것
             const splitArr: string[] = this.SplitLongStringApproximatelyIn2048(text, i);
             text = splitArr.join('\n');
 
             const multilineTexts = text.split('\n');
-
             for (let j = 0; j < multilineTexts.length; ++j) {
                 const labelString = multilineTexts[j];
                 if (labelString === '') {
@@ -1198,10 +1218,11 @@ export class RichText extends Component {
             this._labelWidth = this._maxWidth;
         }
         this._labelHeight = (this._lineCount + BASELINE_RATIO) * this._lineHeight;
-
-        // trigger "size-changed" event
-        this.node._uiProps.uiTransformComp!.setContentSize(this._labelWidth, this._labelHeight);
-
+        if (!this._fixLineHeight) {
+            this.node._uiProps.uiTransformComp!.setContentSize(this._labelWidth, this._labelHeight);
+        } else {
+            this.node._uiProps.uiTransformComp!.markRenderDataDirty();
+        }
         this._updateRichTextPosition();
         this._layoutDirty = false;
     }
@@ -1333,7 +1354,7 @@ export class RichText extends Component {
 
         if (textStyle) {
             label.color = this._convertLiteralColorValue(textStyle.color || 'white');
-            label.isBold = !!textStyle.bold;
+            label.isBold = !this.fixBold ? false : !!textStyle.bold;
             label.isItalic = !!textStyle.italic;
             // TODO: temporary implementation, the italic effect should be implemented in the internal of label-assembler.
             // if (textStyle.italic) {
@@ -1404,6 +1425,91 @@ export class RichText extends Component {
             seg.shadow.blur = this.shadowBlur;
             seg.shadow.offset = this.shadowOffset;
         });
+    }
+
+    public _setPreMessageBoxLayer (message: string): number {
+        const newTextArray = _htmlTextParser.parse(message);
+
+        this._textArray = newTextArray.slice();
+        this._resetState();
+
+        let lastEmptyLine = false;
+        let label: ISegment;
+        this.fixLineHeight = true;
+        for (let i = 0; i < this._textArray.length; ++i) {
+            const richTextElement = this._textArray[i];
+            let text = richTextElement.text;
+            if (text === undefined) {
+                continue;
+            }
+
+            // handle <br/> <img /> tag
+            if (text === '') {
+                if (richTextElement.style && richTextElement.style.isNewLine) {
+                    this._updateLineInfo();
+                    continue;
+                }
+                if (richTextElement.style && richTextElement.style.isImage && this._imageAtlas) {
+                    this._addRichTextImageElement(richTextElement);
+                    continue;
+                }
+            }
+            //SplitLongStringApproximatelyIn2048을 수정해야한다. setString(현재, 기준) 이렇게 보내서 처리 할 것
+            const splitArr: string[] = this.SplitLongStringApproximatelyIn2048(text, i);
+            text = splitArr.join('\n');
+
+            const multilineTexts = text.split('\n');
+            for (let j = 0; j < multilineTexts.length; ++j) {
+                const labelString = multilineTexts[j];
+                if (labelString === '') {
+                    // for continues \n
+                    if (this._isLastComponentCR(text) && j === multilineTexts.length - 1) {
+                        continue;
+                    }
+                    this._updateLineInfo();
+                    lastEmptyLine = true;
+                    continue;
+                }
+                lastEmptyLine = false;
+
+                if (this._maxWidth > 0) {
+                    const labelWidth = this._measureText(i, labelString) as number;
+                    this._updateRichTextWithMaxWidth(labelString, labelWidth, i);
+
+                    if ((multilineTexts.length > 1 && j < multilineTexts.length - 1)
+                        || (j === multilineTexts.length - 1 && this._lineOffsetX >= this.maxWidth - this.fontSize)) {
+                        this._updateLineInfo();
+                    }
+                } else {
+                    label = this._addLabelSegment(labelString, i);
+
+                    this._lineOffsetX += label.node._uiProps.uiTransformComp!.width;
+                    if (this._lineOffsetX > this._labelWidth) {
+                        this._labelWidth = this._lineOffsetX;
+                    }
+
+                    if (multilineTexts.length > 1 && j < multilineTexts.length - 1) {
+                        this._updateLineInfo();
+                    }
+                }
+            }
+        }
+        if (!lastEmptyLine) {
+            this._linesWidth.push(this._lineOffsetX);
+        }
+
+        if (this._maxWidth > 0) {
+            this._labelWidth = this._maxWidth;
+        }
+
+        this._labelHeight = (this._lineCount + BASELINE_RATIO) * this._lineHeight;
+
+        this.node._uiProps.uiTransformComp!.setContentSize(this._labelWidth, this._labelHeight);
+
+        this._updateRichTextPosition();
+        this._layoutDirty = false;
+
+        return this._lineCount;
     }
 }
 

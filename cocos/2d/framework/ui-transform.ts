@@ -364,6 +364,10 @@ export class UITransform extends Component {
         this._markRenderDataDirty();
     }
 
+    public markRenderDataDirty () {
+        this._markRenderDataDirty();
+    }
+
     /**
      * @en
      * Sets the anchor point in percent. <br/>
