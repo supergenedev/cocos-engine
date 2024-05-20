@@ -1218,11 +1218,9 @@ export class RichText extends Component {
             this._labelWidth = this._maxWidth;
         }
         this._labelHeight = (this._lineCount + BASELINE_RATIO) * this._lineHeight;
-        if (!this._fixLineHeight) {
-            this.node._uiProps.uiTransformComp!.setContentSize(this._labelWidth, this._labelHeight);
-        } else {
-            this.node._uiProps.uiTransformComp!.markRenderDataDirty();
-        }
+
+        this.node._uiProps.uiTransformComp!.setContentSize(this._labelWidth, this._labelHeight);
+
         this._updateRichTextPosition();
         this._layoutDirty = false;
     }
@@ -1494,21 +1492,6 @@ export class RichText extends Component {
                 }
             }
         }
-        if (!lastEmptyLine) {
-            this._linesWidth.push(this._lineOffsetX);
-        }
-
-        if (this._maxWidth > 0) {
-            this._labelWidth = this._maxWidth;
-        }
-
-        this._labelHeight = (this._lineCount + BASELINE_RATIO) * this._lineHeight;
-
-        this.node._uiProps.uiTransformComp!.setContentSize(this._labelWidth, this._labelHeight);
-
-        this._updateRichTextPosition();
-        this._layoutDirty = false;
-
         return this._lineCount;
     }
 }
